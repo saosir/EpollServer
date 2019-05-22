@@ -49,8 +49,12 @@
 //   tmp_list_. Once iteration is done, tmp_list_ will be empty, and
 //   ready_list_ will have all the new ready fds.
 
-#ifndef
+#ifndef DCHECK
 #define DCHECK assert
+#endif
+
+#ifndef DCHECK_EQ
+#define DCHECK_EQ(x, y) assert((x) == (y))
 #endif
 
 // The size we use for buffers passed to strerror_r
@@ -318,6 +322,21 @@ void EpollServer::StartWrite(int fd) {
   ModifyFD(fd, 0, EPOLLOUT);
 }
 
+class TrueFalseGuard {
+ public:
+  explicit TrueFalseGuard(bool* guarded_bool) : guarded_bool_(guarded_bool) {
+    DCHECK(guarded_bool_ != NULL);
+    DCHECK(*guarded_bool_ == false);
+    *guarded_bool_ = true;
+  }
+  ~TrueFalseGuard() {
+    *guarded_bool_ = false;
+  }
+ private:
+  bool* guarded_bool_;
+};
+
+
 void EpollServer::HandleEvent(int fd, int event_mask) {
 #ifdef EPOLL_SERVER_EVENT_TRACING
   event_recorder_.RecordEpollEvent(fd, event_mask);
@@ -345,8 +364,7 @@ void EpollServer::WaitForEventsAndExecuteCallbacks() {
     // we never see it.
     return;  // COV_NF_LINE
   }
-  base::AutoReset<bool> recursion_guard(
-      &in_wait_for_events_and_execute_callbacks_, true);
+  TrueFalseGuard recursion_guard(&in_wait_for_events_and_execute_callbacks_);
   if (alarm_map_.empty()) {
     // no alarms, this is business as usual.
     WaitForEventsAndCallHandleEvents(timeout_in_us_,
@@ -442,7 +460,7 @@ void EpollServer::VerifyReadyList() const {
 
 void EpollServer::RegisterAlarm(int64_t timeout_time_in_us, AlarmCB* ac) {
   CHECK(ac);
-  if (base::ContainsKey(all_alarms_, ac)) {
+  if (all_alarms_.find(ac) != all_alarms_.end())) {
     LOG(FATAL) << "Alarm already exists " << ac;
   }
   VLOG(4) << "RegisteringAlarm at : " << timeout_time_in_us;
@@ -682,7 +700,7 @@ void EpollServer::CallReadyListCallbacks() {
     tmp_list_.lh_first->entry.le_prev = &tmp_list_.lh_first;
     EpollEvent event(0);
     while (tmp_list_.lh_first != NULL) {
-      DCHECK_GT(ready_list_size_, 0);
+      assert(ready_list_size_ > 0);
       CBAndEventMask* cb_and_mask = tmp_list_.lh_first;
       RemoveFromReadyList(*cb_and_mask);
 
@@ -697,7 +715,8 @@ void EpollServer::CallReadyListCallbacks() {
         // UnRegister call will now simply set the cb to NULL instead of
         // invalidating the cb_and_mask object (by deleting the object in the
         // map to which cb_and_mask refers)
-        base::AutoReset<bool> in_use_guard(&(cb_and_mask->in_use), true);
+        // base::AutoReset<bool> in_use_guard(&(cb_and_mask->in_use), true);
+        TrueFalseGuard is_user_guard(&(cb_and_mask->in_use));
         cb_and_mask->cb->OnEvent(cb_and_mask->fd, &event);
       }
 
